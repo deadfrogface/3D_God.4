@@ -1,1 +1,27 @@
-.
+# Core GUI and system
+PySide6>=6.5.0
+numpy>=1.24.0
+Pillow>=10.0.0
+requests>=2.31.0
+aiohttp>=3.8.0
+
+# 3D processing
+trimesh>=3.22.0
+open3d>=0.17.0
+
+# AI/ML (stubs for now)
+torch>=2.0.0
+torchvision>=0.15.0
+
+# Image processing
+opencv-python>=4.8.0
+imageio>=2.31.0
+
+# System utilities
+psutil>=5.9.0
+appdirs>=1.4.4
+pyyaml>=6.0
+
+# Development (optional)
+pytest>=7.4.0
+black>=23.0.0
