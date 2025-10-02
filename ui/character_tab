@@ -1,1 +1,243 @@
-.
+"""Character editing tab with sculpting and anatomy controls"""
+from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QSlider, 
+                              QLabel, QPushButton, QGroupBox, QGridLayout,
+                              QScrollArea, QFrame)
+from PySide6.QtCore import Qt, Signal
+import logging
+
+logger = logging.getLogger(__name__)
+
+class CharacterTab(QWidget):
+    """Character editing and sculpting tab"""
+    
+    parameter_changed = Signal(str, float)
+    
+    def __init__(self, state_manager, froggy_ai):
+        super().__init__()
+        self.state_manager = state_manager
+        self.froggy_ai = froggy_ai
+        self.sliders = {}
+        self.setup_ui()
+        
+    def setup_ui(self):
+        """Setup the character tab UI"""
+        layout = QVBoxLayout(self)
+        
+        # Create scrollable area
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll_widget = QWidget()
+        scroll_layout = QVBoxLayout(scroll_widget)
+        
+        # Body parameters group
+        body_group = self.create_body_parameters_group()
+        scroll_layout.addWidget(body_group)
+        
+        # Sculpting controls
+        sculpt_group = self.create_sculpting_group()
+        scroll_layout.addWidget(sculpt_group)
+        
+        # Anatomy layers
+        anatomy_group = self.create_anatomy_group()
+        scroll_layout.addWidget(anatomy_group)
+        
+        # Gender controls
+        gender_group = self.create_gender_group()
+        scroll_layout.addWidget(gender_group)
+        
+        scroll_layout.addStretch()
+        scroll.setWidget(scroll_widget)
+        layout.addWidget(scroll)
+        
+    def create_body_parameters_group(self):
+        """Create body parameters control group"""
+        group = QGroupBox("Body Parameters")
+        layout = QGridLayout()
+        
+        # Define body parameters with ranges
+        parameters = [
+            ("Height", 0.5, 2.0, 1.0, "Overall character height"),
+            ("Weight", 0.3, 1.5, 1.0, "Body mass index"),
+            ("Muscle Mass", 0.0, 1.0, 0.5, "Muscle definition"),
+            ("Chest Size", 0.5, 1.5, 1.0, "Chest circumference"),
+            ("Waist Size", 0.5, 1.5, 1.0, "Waist circumference"),
+            ("Hip Size", 0.5, 1.5, 1.0, "Hip circumference"),
+            ("Shoulder Width", 0.5, 1.5, 1.0, "Shoulder breadth"),
+            ("Arm Length", 0.5, 1.5, 1.0, "Arm proportions"),
+            ("Leg Length", 0.5, 1.5, 1.0, "Leg proportions"),
+            ("Head Size", 0.5, 1.2, 1.0, "Head scale"),
+            ("Neck Length", 0.7, 1.3, 1.0, "Neck proportions"),
+            ("Torso Length", 0.7, 1.3, 1.0, "Torso proportions"),
+        ]
+        
+        for i, (name, min_val, max_val, default, tooltip) in enumerate(parameters):
+            # Create parameter row
+            label = QLabel(f"{name}:")
+            label.setToolTip(tooltip)
+            slider = QSlider(Qt.Horizontal)
+            slider.setRange(int(min_val * 100), int(max_val * 100))
+            slider.setValue(int(default * 100))
+            value_label = QLabel(f"{default:.2f}")
+            value_label.setMinimumWidth(50)
+            
+            # Connect slider
+            slider.valueChanged.connect(
+                lambda value, n=name, l=value_label: self.on_parameter_changed(n, value, l)
+            )
+            
+            layout.addWidget(label, i, 0)
+            layout.addWidget(slider, i, 1)
+            layout.addWidget(value_label, i, 2)
+            
+            self.sliders[name] = slider
+            
+        group.setLayout(layout)
+        return group
+        
+    def create_sculpting_group(self):
+        """Create sculpting control group"""
+        group = QGroupBox("Sculpting Tools")
+        layout = QVBoxLayout()
+        
+        # Blender sculpting button
+        sculpt_btn = QPushButton("🎨 Open Blender Sculpting")
+        sculpt_btn.clicked.connect(self.open_blender_sculpting)
+        sculpt_btn.setMinimumHeight(40)
+        layout.addWidget(sculpt_btn)
+        
+        # Quick sculpt controls
+        quick_layout = QHBoxLayout()
+        
+        smooth_btn = QPushButton("Smooth")
+        smooth_btn.clicked.connect(lambda: self.apply_sculpting("smooth"))
+        quick_layout.addWidget(smooth_btn)
+        
+        inflate_btn = QPushButton("Inflate")
+        inflate_btn.clicked.connect(lambda: self.apply_sculpting("inflate"))
+        quick_layout.addWidget(inflate_btn)
+        
+        grab_btn = QPushButton("Grab")
+        grab_btn.clicked.connect(lambda: self.apply_sculpting("grab"))
+        quick_layout.addWidget(grab_btn)
+        
+        layout.addLayout(quick_layout)
+        
+        group.setLayout(layout)
+        return group
+        
+    def create_anatomy_group(self):
+        """Create anatomy layers control group"""
+        group = QGroupBox("Anatomy Layers")
+        layout = QHBoxLayout()
+        
+        layers = ["Skin", "Muscles", "Skeleton", "Organs", "Nerves"]
+        
+        for layer in layers:
+            btn = QPushButton(layer)
+            btn.setCheckable(True)
+            btn.setChecked(layer == "Skin")  # Default to skin
+            btn.clicked.connect(lambda checked, l=layer: self.toggle_anatomy_layer(l, checked))
+            layout.addWidget(btn)
+            
+        group.setLayout(layout)
+        return group
+        
+    def create_gender_group(self):
+        """Create gender feature control group"""
+        group = QGroupBox("Gender Features")
+        layout = QVBoxLayout()
+        
+        # Preset combinations
+        preset_layout = QHBoxLayout()
+        
+        female_btn = QPushButton("♀ Female")
+        female_btn.clicked.connect(lambda: self.set_gender_preset("female"))
+        preset_layout.addWidget(female_btn)
+        
+        male_btn = QPushButton("♂ Male")
+        male_btn.clicked.connect(lambda: self.set_gender_preset("male"))
+        preset_layout.addWidget(male_btn)
+        
+        custom_btn = QPushButton("⚧ Custom")
+        custom_btn.setCheckable(True)
+        custom_btn.clicked.connect(self.toggle_custom_gender)
+        preset_layout.addWidget(custom_btn)
+        
+        layout.addLayout(preset_layout)
+        
+        # Custom controls (initially hidden)
+        self.custom_controls = QWidget()
+        custom_layout = QHBoxLayout(self.custom_controls)
+        self.custom_controls.setVisible(False)
+        
+        self.female_top_cb = QPushButton("Female Top")
+        self.female_top_cb.setCheckable(True)
+        self.female_top_cb.setChecked(True)
+        self.female_top_cb.clicked.connect(self.update_custom_gender)
+        custom_layout.addWidget(self.female_top_cb)
+        
+        self.male_bottom_cb = QPushButton("Male Bottom")
+        self.male_bottom_cb.setCheckable(True)
+        self.male_bottom_cb.clicked.connect(self.update_custom_gender)
+        custom_layout.addWidget(self.male_bottom_cb)
+        
+        layout.addWidget(self.custom_controls)
+        group.setLayout(layout)
+        return group
+        
+    def on_parameter_changed(self, name: str, value: int, value_label: QLabel):
+        """Handle parameter slider changes"""
+        float_value = value / 100.0
+        value_label.setText(f"{float_value:.2f}")
+        self.state_manager.update_character_parameter(name, float_value)
+        self.parameter_changed.emit(name, float_value)
+        
+    def open_blender_sculpting(self):
+        """Open Blender in sculpting mode"""
+        self.froggy_ai.speak("Opening Blender sculpting mode... Time to get artistic!")
+        # Will implement Blender integration
+        
+    def apply_sculpting(self, tool: str):
+        """Apply sculpting tool"""
+        self.froggy_ai.speak(f"Applying {tool} tool... Smooth like a frog's skin!")
+        
+    def toggle_anatomy_layer(self, layer: str, visible: bool):
+        """Toggle anatomy layer visibility"""
+        self.froggy_ai.speak(f"{layer} layer {'visible' if visible else 'hidden'}")
+        
+    def set_gender_preset(self, preset: str):
+        """Set gender preset"""
+        if preset == "female":
+            self.state_manager.update_gender_combination({
+                "female_top": True,
+                "male_bottom": False
+            })
+            self.froggy_ai.speak("Female preset activated! ♀")
+        elif preset == "male":
+            self.state_manager.update_gender_combination({
+                "female_top": False,
+                "male_bottom": True
+            })
+            self.froggy_ai.speak("Male preset activated! ♂")
+            
+    def toggle_custom_gender(self):
+        """Toggle custom gender controls"""
+        sender = self.sender()
+        if sender and sender.isChecked():
+            self.custom_controls.setVisible(True)
+            self.froggy_ai.speak("Custom gender mode! Mix and match as you wish! ⚧")
+        else:
+            self.custom_controls.setVisible(False)
+            
+    def update_custom_gender(self):
+        """Update custom gender combination"""
+        combination = {
+            "female_top": self.female_top_cb.isChecked(),
+            "male_bottom": self.male_bottom_cb.isChecked()
+        }
+        self.state_manager.update_gender_combination(combination)
+        
+    def reset_ui(self):
+        """Reset UI to default values"""
+        for name, slider in self.sliders.items():
+            slider.setValue(100)  # Default to 1.0
