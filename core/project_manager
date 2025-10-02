@@ -1,1 +1,154 @@
-.
+"""Project management and configuration"""
+import json
+import os
+from pathlib import Path
+from typing import Dict, Any, Optional
+import logging
+
+logger = logging.getLogger(__name__)
+
+class ProjectManager:
+    """Manages project structure, configuration, and assets"""
+    
+    def __init__(self):
+        self.project_root = Path(__file__).parent.parent
+        self.config_file = self.project_root / "config.json"
+        self.config = self.load_config()
+        
+    def load_config(self) -> Dict[str, Any]:
+        """Load configuration from file or create default"""
+        if self.config_file.exists():
+            try:
+                with open(self.config_file, 'r', encoding='utf-8') as f:
+                    return json.load(f)
+            except Exception as e:
+                logger.error(f"Failed to load config: {e}")
+                
+        return self.create_default_config()
+    
+    def create_default_config(self) -> Dict[str, Any]:
+        """Create default configuration"""
+        config = {
+            "project_name": "3D_God_V3",
+            "version": "3.0.0",
+            "paths": {
+                "blender": self.find_blender_path(),
+                "assets": str(self.project_root / "assets"),
+                "exports": str(self.project_root / "exports"),
+                "presets": str(self.project_root / "presets"),
+                "external": str(self.project_root / "external")
+            },
+            "ai_models": {
+                "triposr": {
+                    "enabled": True,
+                    "model_path": str(self.project_root / "external" / "triposr" / "model.ckpt"),
+                    "stub_mode": True
+                },
+                "juggernaut": {
+                    "enabled": True,
+                    "stub_mode": True
+                }
+            },
+            "nsfw": {
+                "enabled_by_default": True,
+                "assets_path": str(self.project_root / "assets" / "nsfw")
+            },
+            "export": {
+                "default_format": "fbx",
+                "embed_textures": True,
+                "metahuman_compatible": False
+            },
+            "ui": {
+                "theme": "dark",
+                "window_size": [1200, 800]
+            }
+        }
+        
+        self.save_config(config)
+        return config
+    
+    def save_config(self, config: Dict[str, Any]):
+        """Save configuration to file"""
+        try:
+            with open(self.config_file, 'w', encoding='utf-8') as f:
+                json.dump(config, f, indent=4, ensure_ascii=False)
+        except Exception as e:
+            logger.error(f"Failed to save config: {e}")
+    
+    def find_blender_path(self) -> str:
+        """Auto-detect Blender installation"""
+        possible_paths = [
+            # Windows
+            "C:/Program Files/Blender Foundation/Blender 3.6/blender.exe",
+            "C:/Program Files/Blender Foundation/Blender 3.5/blender.exe",
+            "C:/Program Files/Blender Foundation/Blender 3.4/blender.exe",
+            # Linux
+            "/usr/bin/blender",
+            "/usr/local/bin/blender",
+            # macOS
+            "/Applications/Blender.app/Contents/MacOS/Blender"
+        ]
+        
+        for path in possible_paths:
+            if os.path.exists(path):
+                return path
+                
+        return ""  # Empty if not found
+    
+    def initialize_structure(self):
+        """Create necessary project directories"""
+        directories = [
+            "assets",
+            "assets/clothing",
+            "assets/nsfw",
+            "assets/textures",
+            "exports",
+            "presets",
+            "external",
+            "external/triposr",
+            "external/models",
+            "logs",
+            "tests"
+        ]
+        
+        for directory in directories:
+            dir_path = self.project_root / directory
+            dir_path.mkdir(parents=True, exist_ok=True)
+            
+        # Create stub files
+        self.create_stub_files()
+        logger.info("Project structure initialized")
+    
+    def create_stub_files(self):
+        """Create stub files for testing"""
+        # Create stub base character
+        assets_dir = self.project_root / "assets"
+        base_char = assets_dir / "base_character.fbx"
+        if not base_char.exists():
+            base_char.write_text("# FBX stub file - replace with actual 3D model\n")
+            
+        # Create stub icon
+        icon_file = assets_dir / "icon.png"
+        if not icon_file.exists():
+            # Create a simple PNG stub (1x1 pixel)
+            icon_file.write_bytes(b'\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x02\x00\x00\x00\x90wS\xde\x00\x00\x00\tpHYs\x00\x00\x0b\x13\x00\x00\x0b\x13\x01\x00\x9a\x9c\x18\x00\x00\x00\nIDATx\x9cc\xf8\x00\x00\x00\x01\x00\x01\x00\x00\x00\x00IEND\xaeB`\x82')
+            
+        # Create stub TripoSR model
+        triposr_model = self.project_root / "external" / "triposr" / "model.ckpt"
+        if not triposr_model.exists():
+            triposr_model.parent.mkdir(parents=True, exist_ok=True)
+            triposr_model.write_text("# TripoSR model stub - replace with actual model\n")
+    
+    def get_asset_path(self, asset_type: str, filename: str = "") -> Path:
+        """Get path to specific asset"""
+        base_path = Path(self.config["paths"]["assets"])
+        asset_path = base_path / asset_type / filename if filename else base_path / asset_type
+        return asset_path
+    
+    def get_export_path(self, filename: str = "") -> Path:
+        """Get path to export directory"""
+        export_path = Path(self.config["paths"]["exports"])
+        if filename:
+            return export_path / filename
+        return export_path
+
