@@ -1,1 +1,79 @@
-.
+#!/usr/bin/env python3
+"""
+3D_God V3 - Ultimate Character Creator
+A complete 3D character creation tool with AI integration
+Based on the German development plan
+"""
+import sys
+import os
+from pathlib import Path
+from PySide6.QtWidgets import QApplication
+from PySide6.QtCore import Qt
+import logging
+
+# Add project root to path
+project_root = Path(__file__).parent
+sys.path.insert(0, str(project_root))
+
+from core.project_manager import ProjectManager
+from core.state_manager import StateManager
+from ui.main_window import MainWindow
+from ai.froggy_assistant import FroggyAI
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler(),
+        logging.FileHandler('3d_god.log', encoding='utf-8')
+    ]
+)
+logger = logging.getLogger(__name__)
+
+class GodApp:
+    """Main application class"""
+    
+    def __init__(self):
+        self.app = QApplication(sys.argv)
+        self.app.setApplicationName("3D_God V3")
+        self.app.setApplicationVersion("3.0.0")
+        
+        # Set application style
+        self.app.setStyle('Fusion')
+        
+        # Initialize core systems
+        logger.info("Initializing 3D_God V3...")
+        self.project_manager = ProjectManager()
+        self.state_manager = StateManager()
+        self.froggy_ai = FroggyAI()
+        
+        # Ensure project structure
+        self.project_manager.initialize_structure()
+        
+        # Create main window
+        self.main_window = MainWindow(
+            self.project_manager,
+            self.state_manager,
+            self.froggy_ai
+        )
+        
+    def run(self):
+        """Start the application"""
+        try:
+            logger.info("Starting 3D_God V3...")
+            self.main_window.show()
+            
+            # Welcome message from Froggy
+            self.froggy_ai.welcome_message()
+            
+            return self.app.exec()
+            
+        except Exception as e:
+            logger.error(f"Application crashed: {e}")
+            return 1
+
+if __name__ == "__main__":
+    god_app = GodApp()
+    sys.exit(god_app.run())
+
