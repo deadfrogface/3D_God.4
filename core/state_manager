@@ -1,1 +1,133 @@
-.
+"""Global state management for the application"""
+from typing import Dict, Any, Optional, List
+from dataclasses import dataclass, field
+import logging
+from pathlib import Path
+
+logger = logging.getLogger(__name__)
+
+@dataclass
+class CharacterState:
+    """Represents the current character state"""
+    name: str = "Untitled"
+    body_parameters: Dict[str, float] = field(default_factory=dict)
+    clothing_items: List[Dict[str, Any]] = field(default_factory=list)
+    accessories: List[Dict[str, Any]] = field(default_factory=list)
+    materials: Dict[str, Any] = field(default_factory=dict)
+    nsfw_enabled: bool = True
+    gender_combination: Dict[str, bool] = field(default_factory=lambda: {
+        "female_top": True,
+        "male_bottom": False
+    })
+    mesh_path: Optional[str] = None
+    rig_path: Optional[str] = None
+    ai_generated: bool = False
+    generation_prompt: str = ""
+
+class StateManager:
+    """Manages global application state"""
+    
+    def __init__(self):
+        self.current_character = CharacterState()
+        self.project_settings = {}
+        self.blender_connected = False
+        self.ai_models_ready = False
+        self.recent_actions = []
+        
+    def update_character_parameter(self, parameter: str, value: float):
+        """Update character body parameter"""
+        self.current_character.body_parameters[parameter] = value
+        self.add_action(f"Updated {parameter} to {value}")
+        logger.info(f"Character parameter updated: {parameter} = {value}")
+        
+    def add_clothing_item(self, item_data: Dict[str, Any]):
+        """Add clothing item to character"""
+        self.current_character.clothing_items.append(item_data)
+        self.add_action(f"Added clothing: {item_data.get('name', 'Unknown')}")
+        logger.info(f"Clothing item added: {item_data}")
+        
+    def add_accessory(self, accessory_data: Dict[str, Any]):
+        """Add accessory to character"""
+        self.current_character.accessories.append(accessory_data)
+        self.add_action(f"Added accessory: {accessory_data.get('name', 'Unknown')}")
+        logger.info(f"Accessory added: {accessory_data}")
+        
+    def set_nsfw_enabled(self, enabled: bool):
+        """Enable/disable NSFW content"""
+        self.current_character.nsfw_enabled = enabled
+        self.add_action(f"NSFW {'enabled' if enabled else 'disabled'}")
+        logger.info(f"NSFW toggled: {enabled}")
+        
+    def update_gender_combination(self, combination: Dict[str, bool]):
+        """Update gender feature combination"""
+        self.current_character.gender_combination.update(combination)
+        self.add_action(f"Gender combination updated")
+        logger.info(f"Gender combination: {combination}")
+        
+    def set_character_mesh(self, mesh_path: str, ai_generated: bool = False):
+        """Set character mesh path"""
+        self.current_character.mesh_path = mesh_path
+        self.current_character.ai_generated = ai_generated
+        self.add_action(f"Character mesh updated: {Path(mesh_path).name}")
+        logger.info(f"Mesh path set: {mesh_path}")
+        
+    def get_character_state(self) -> CharacterState:
+        """Get current character state"""
+        return self.current_character
+        
+    def add_action(self, action: str):
+        """Add action to history"""
+        self.recent_actions.append(action)
+        if len(self.recent_actions) > 50:  # Keep last 50 actions
+            self.recent_actions.pop(0)
+            
+    def reset_character(self):
+        """Reset character to default state"""
+        self.current_character = CharacterState()
+        self.add_action("Character reset to default")
+        logger.info("Character state reset")
+        
+    def export_state_dict(self) -> Dict[str, Any]:
+        """Export state as dictionary for saving"""
+        return {
+            "character": {
+                "name": self.current_character.name,
+                "body_parameters": self.current_character.body_parameters,
+                "clothing_items": self.current_character.clothing_items,
+                "accessories": self.current_character.accessories,
+                "materials": self.current_character.materials,
+                "nsfw_enabled": self.current_character.nsfw_enabled,
+                "gender_combination": self.current_character.gender_combination,
+                "mesh_path": self.current_character.mesh_path,
+                "rig_path": self.current_character.rig_path,
+                "ai_generated": self.current_character.ai_generated,
+                "generation_prompt": self.current_character.generation_prompt
+            },
+            "project_settings": self.project_settings,
+            "blender_connected": self.blender_connected,
+            "ai_models_ready": self.ai_models_ready
+        }
+        
+    def import_state_dict(self, state_data: Dict[str, Any]):
+        """Import state from dictionary"""
+        if "character" in state_data:
+            char_data = state_data["character"]
+            self.current_character.name = char_data.get("name", "Untitled")
+            self.current_character.body_parameters = char_data.get("body_parameters", {})
+            self.current_character.clothing_items = char_data.get("clothing_items", [])
+            self.current_character.accessories = char_data.get("accessories", [])
+            self.current_character.materials = char_data.get("materials", {})
+            self.current_character.nsfw_enabled = char_data.get("nsfw_enabled", True)
+            self.current_character.gender_combination = char_data.get("gender_combination", {"female_top": True, "male_bottom": False})
+            self.current_character.mesh_path = char_data.get("mesh_path")
+            self.current_character.rig_path = char_data.get("rig_path")
+            self.current_character.ai_generated = char_data.get("ai_generated", False)
+            self.current_character.generation_prompt = char_data.get("generation_prompt", "")
+            
+        self.project_settings = state_data.get("project_settings", {})
+        self.blender_connected = state_data.get("blender_connected", False)
+        self.ai_models_ready = state_data.get("ai_models_ready", False)
+        
+        self.add_action("State imported from preset")
+        logger.info("State imported successfully")
+
