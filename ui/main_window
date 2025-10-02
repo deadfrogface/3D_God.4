@@ -1,1 +1,204 @@
-.
+"""Main application window"""
+from PySide6.QtWidgets import (QMainWindow, QTabWidget, QWidget, QVBoxLayout, 
+                              QStatusBar, QMenuBar, QMenu, QFileDialog, QMessageBox,
+                              QToolBar, QLabel)
+from PySide6.QtCore import Qt, Signal
+from PySide6.QtGui import QAction, QIcon
+import logging
+
+from .character_tab import CharacterTab
+from .clothing_tab import ClothingTab
+from .ai_tab import AITab
+from .rigging_tab import RiggingTab
+from .nsfw_toggle import NSFWToggle
+
+logger = logging.getLogger(__name__)
+
+class MainWindow(QMainWindow):
+    """Main application window"""
+    
+    def __init__(self, project_manager, state_manager, froggy_ai):
+        super().__init__()
+        self.project_manager = project_manager
+        self.state_manager = state_manager
+        self.froggy_ai = froggy_ai
+        
+        self.setWindowTitle("3D_God V3 - Ultimate Character Creator")
+        self.setMinimumSize(1200, 800)
+        
+        # Connect Froggy messages
+        self.froggy_ai.message_ready.connect(self.show_froggy_message)
+        
+        self.setup_ui()
+        self.setup_menu_bar()
+        self.setup_tool_bar()
+        self.setup_status_bar()
+        
+    def setup_ui(self):
+        """Setup the main UI"""
+        central_widget = QWidget()
+        self.setCentralWidget(central_widget)
+        
+        layout = QVBoxLayout(central_widget)
+        
+        # Create tab widget
+        self.tab_widget = QTabWidget()
+        layout.addWidget(self.tab_widget)
+        
+        # Create tabs
+        self.character_tab = CharacterTab(self.state_manager, self.froggy_ai)
+        self.clothing_tab = ClothingTab(self.state_manager, self.froggy_ai)
+        self.ai_tab = AITab(self.state_manager, self.froggy_ai)
+        self.rigging_tab = RiggingTab(self.state_manager, self.froggy_ai)
+        
+        # Add tabs
+        self.tab_widget.addTab(self.character_tab, "🧍 Character")
+        self.tab_widget.addTab(self.clothing_tab, "👕 Clothing")
+        self.tab_widget.addTab(self.ai_tab, "🤖 AI Generator")
+        self.tab_widget.addTab(self.rigging_tab, "🔧 Rigging & Export")
+        
+        # Connect tab changes
+        self.tab_widget.currentChanged.connect(self.on_tab_changed)
+        
+    def setup_menu_bar(self):
+        """Setup menu bar"""
+        menubar = self.menuBar()
+        
+        # File menu
+        file_menu = menubar.addMenu("File")
+        
+        new_action = QAction("New Character", self)
+        new_action.setShortcut("Ctrl+N")
+        new_action.triggered.connect(self.new_character)
+        file_menu.addAction(new_action)
+        
+        save_action = QAction("Save Preset", self)
+        save_action.setShortcut("Ctrl+S")
+        save_action.triggered.connect(self.save_preset)
+        file_menu.addAction(save_action)
+        
+        load_action = QAction("Load Preset", self)
+        load_action.setShortcut("Ctrl+O")
+        load_action.triggered.connect(self.load_preset)
+        file_menu.addAction(load_action)
+        
+        file_menu.addSeparator()
+        
+        exit_action = QAction("Exit", self)
+        exit_action.setShortcut("Ctrl+Q")
+        exit_action.triggered.connect(self.close)
+        file_menu.addAction(exit_action)
+        
+        # Import menu
+        import_menu = menubar.addMenu("Import")
+        
+        import_daz_action = QAction("Import Daz3D Character", self)
+        import_daz_action.triggered.connect(self.import_daz_character)
+        import_menu.addAction(import_daz_action)
+        
+        import_meta_action = QAction("Import Metahuman", self)
+        import_meta_action.triggered.connect(self.import_metahuman)
+        import_menu.addAction(import_meta_action)
+        
+        # Help menu
+        help_menu = menubar.addMenu("Help")
+        
+        about_action = QAction("About 3D_God V3", self)
+        about_action.triggered.connect(self.show_about)
+        help_menu.addAction(about_action)
+        
+        froggy_action = QAction("Ask Froggy", self)
+        froggy_action.triggered.connect(self.ask_froggy)
+        help_menu.addAction(froggy_action)
+        
+    def setup_tool_bar(self):
+        """Setup toolbar with quick actions"""
+        toolbar = QToolBar("Quick Actions")
+        self.addToolBar(toolbar)
+        
+        # NSFW toggle
+        self.nsfw_toggle = NSFWToggle(self.state_manager)
+        toolbar.addWidget(self.nsfw_toggle)
+        
+        toolbar.addSeparator()
+        
+        # Quick generate
+        quick_gen_action = QAction("🤖 Quick Generate", self)
+        quick_gen_action.triggered.connect(self.quick_generate)
+        toolbar.addAction(quick_gen_action)
+        
+        # Quick export
+        quick_export_action = QAction("📤 Quick Export", self)
+        quick_export_action.triggered.connect(self.quick_export)
+        toolbar.addAction(quick_export_action)
+        
+        # Froggy status
+        toolbar.addSeparator()
+        self.froggy_label = QLabel("🐸 Froggy Ready")
+        toolbar.addWidget(self.froggy_label)
+        
+    def setup_status_bar(self):
+        """Setup status bar"""
+        self.status_bar = QStatusBar()
+        self.setStatusBar(self.status_bar)
+        self.status_bar.showMessage("3D_God V3 Ready - Froggy AI Standing By")
+        
+    def on_tab_changed(self, index):
+        """Handle tab changes"""
+        tab_name = self.tab_widget.tabText(index)
+        self.status_bar.showMessage(f"Switched to {tab_name} tab")
+        
+    def new_character(self):
+        """Create new character"""
+        self.state_manager.reset_character()
+        self.character_tab.reset_ui()
+        self.status_bar.showMessage("New character created")
+        self.froggy_ai.speak("Fresh canvas! Let's create something amazing!")
+        
+    def save_preset(self):
+        """Save character preset"""
+        # Implementation will be added
+        self.status_bar.showMessage("Save preset - Coming soon!")
+        self.froggy_ai.speak("Saving your masterpiece for later!")
+        
+    def load_preset(self):
+        """Load character preset"""
+        # Implementation will be added
+        self.status_bar.showMessage("Load preset - Coming soon!")
+        self.froggy_ai.speak("Loading a previous creation!")
+        
+    def import_daz_character(self):
+        """Import Daz3D character"""
+        file_path, _ = QFileDialog.getOpenFileName(
+            self, "Import Daz3D Character", "", 
+            "FBX Files (*.fbx);;OBJ Files (*.obj)"
+        )
+        if file_path:
+            self.status_bar.showMessage(f"Importing Daz3D character: {file_path}")
+            self.froggy_ai.speak("Daz3D import initiated! Let's see what we're working with!")
+            
+    def import_metahuman(self):
+        """Import Metahuman character"""
+        file_path, _ = QFileDialog.getOpenFileName(
+            self, "Import Metahuman", "", "FBX Files (*.fbx)"
+        )
+        if file_path:
+            self.status_bar.showMessage(f"Importing Metahuman: {file_path}")
+            self.froggy_ai.speak("Metahuman detected! Epic stuff coming through!")
+            
+    def quick_generate(self):
+        """Quick AI generation"""
+        self.tab_widget.setCurrentWidget(self.ai_tab)
+        self.froggy_ai.speak("Quick generation! Let's make some 3D magic happen!")
+        
+    def quick_export(self):
+        """Quick export"""
+        self.tab_widget.setCurrentWidget(self.rigging_tab)
+        self.status_bar.showMessage("Quick export initiated")
+        self.froggy_ai.speak("Exporting your digital masterpiece!")
+        
+    def show_about(self):
+        """Show about dialog"""
+        QMessageBox.about(
+            self,
+            "About 3D_God
