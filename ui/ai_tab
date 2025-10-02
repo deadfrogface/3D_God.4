@@ -1,1 +1,364 @@
-.
+"""AI generation tab with TripoSR and Juggernaut integration"""
+from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLineEdit, 
+                              QPushButton, QLabel, QTextEdit, QComboBox,
+                              QProgressBar, QFileDialog, QGroupBox)
+from PySide6.QtCore import Qt, QThread, Signal
+import logging
+from pathlib import Path
+
+logger = logging.getLogger(__name__)
+
+class GenerationThread(QThread):
+    """Thread for AI generation to avoid blocking UI"""
+    progress_update = Signal(int)
+    generation_complete = Signal(str, str)  # mesh_path, generation_type
+    generation_error = Signal(str)
+    status_update = Signal(str)
+    
+    def __init__(self, ai_backend, input_data, generation_type):
+        super().__init__()
+        self.ai_backend = ai_backend
+        self.input_data = input_data
+        self.generation_type = generation_type
+        
+    def run(self):
+        """Run generation in thread"""
+        try:
+            self.status_update.emit("Starting AI generation...")
+            self.progress_update.emit(10)
+            
+            if self.generation_type == "text_to_3d":
+                self.status_update.emit("Generating reference image...")
+                self.progress_update.emit(30)
+                
+                # Generate reference image (stub for now)
+                image_path = self.ai_backend.generate_reference_image(
+                    self.input_data["text"]
+                )
+                
+                self.status_update.emit("Converting image to 3D mesh...")
+                self.progress_update.emit(60)
+                
+                # Generate 3D mesh from image
+                mesh_path = self.ai_backend.generate_3d_mesh(image_path)
+                
+            elif self.generation_type == "image_to_3d":
+                self.status_update.emit("Converting image to 3D mesh...")
+                self.progress_update.emit(50)
+                
+                # Generate 3D mesh directly from image
+                mesh_path = self.ai_backend.generate_3d_mesh(
+                    self.input_data["image"]
+                )
+                
+            self.progress_update.emit(100)
+            self.generation_complete.emit(mesh_path, self.generation_type)
+            
+        except Exception as e:
+            self.generation_error.emit(str(e))
+
+class AITab(QWidget):
+    """AI generation tab"""
+    
+    def __init__(self, state_manager, froggy_ai):
+        super().__init__()
+        self.state_manager = state_manager
+        self.froggy_ai = froggy_ai
+        self.generation_thread = None
+        self.current_image_path = None
+        
+        self.setup_ui()
+        
+    def setup_ui(self):
+        """Setup AI tab UI"""
+        layout = QVBoxLayout(self)
+        
+        # Input section
+        input_group = QGroupBox("AI Generation Input")
+        input_layout = QVBoxLayout()
+        
+        # Text input
+        text_layout = QHBoxLayout()
+        text_label = QLabel("Text Prompt:")
+        text_label.setMinimumWidth(100)
+        self.text_input = QLineEdit()
+        self.text_input.setPlaceholderText("Describe your character... e.g., 'beautiful female warrior with armor'")
+        self.text_input.textChanged.connect(self.on_text_changed)
+        text_layout.addWidget(text_label)
+        text_layout.addWidget(self.text_input)
+        input_layout.addLayout(text_layout)
+        
+        # Image input
+        image_layout = QHBoxLayout()
+        image_label = QLabel("Reference Image:")
+        image_label.setMinimumWidth(100)
+        self.image_path_label = QLabel("No image selected")
+        self.select_image_btn = QPushButton("📷 Select Image")
+        self.select_image_btn.clicked.connect(self.select_image)
+        self.clear_image_btn = QPushButton("❌ Clear")
+        self.clear_image_btn.clicked.connect(self.clear_image)
+        self.clear_image_btn.setEnabled(False)
+        
+        image_layout.addWidget(image_label)
+        image_layout.addWidget(self.image_path_label, 1)
+        image_layout.addWidget(self.select_image_btn)
+        image_layout.addWidget(self.clear_image_btn)
+        input_layout.addLayout(image_layout)
+        
+        # Generation options
+        options_layout = QHBoxLayout()
+        options_label = QLabel("Generation Type:")
+        options_label.setMinimumWidth(100)
+        self.generation_type = QComboBox()
+        self.generation_type.addItems(["Text → 3D", "Image → 3D", "Text + Image → 3D"])
+        self.generation_type.currentTextChanged.connect(self.on_generation_type_changed)
+        options_layout.addWidget(options_label)
+        options_layout.addWidget(self.generation_type)
+        input_layout.addLayout(options_layout)
+        
+        # Generate button
+        button_layout = QHBoxLayout()
+        self.generate_btn = QPushButton("🤖 Generate 3D Character")
+        self.generate_btn.clicked.connect(self.generate_character)
+        self.generate_btn.setMinimumHeight(40)
+        self.generate_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #4CAF50;
+                color: white;
+                font-weight: bold;
+                border-radius: 5px;
+                padding: 10px;
+            }
+            QPushButton:hover {
+                background-color: #45a049;
+            }
+            QPushButton:pressed {
+                background-color: #3d8b40;
+            }
+            QPushButton:disabled {
+                background-color: #cccccc;
+                color: #666666;
+            }
+        """)
+        button_layout.addWidget(self.generate_btn)
+        input_layout.addLayout(button_layout)
+        
+        # Progress section
+        progress_group = QGroupBox("Generation Progress")
+        progress_layout = QVBoxLayout()
+        
+        self.progress_bar = QProgressBar()
+        self.progress_bar.setVisible(False)
+        self.progress_bar.setStyleSheet("""
+            QProgressBar {
+                border: 2px solid #cccccc;
+                border-radius: 5px;
+                text-align: center;
+                height: 25px;
+            }
+            QProgressBar::chunk {
+                background-color: #4CAF50;
+                width: 10px;
+                margin: 1px;
+            }
+        """)
+        
+        self.status_text = QTextEdit()
+        self.status_text.setMaximumHeight(100)
+        self.status_text.setReadOnly(True)
+        self.status_text.setPlaceholderText("Generation status will appear here...")
+        
+        progress_layout.addWidget(self.progress_bar)
+        progress_layout.addWidget(self.status_text)
+        progress_group.setLayout(progress_layout)
+        input_layout.addWidget(progress_group)
+        
+        input_group.setLayout(input_layout)
+        layout.addWidget(input_group)
+        
+        # Results section
+        results_group = QGroupBox("Generated Results")
+        results_layout = QVBoxLayout()
+        
+        self.result_label = QLabel("No generation results yet...")
+        self.result_label.setWordWrap(True)
+        self.result_label.setStyleSheet("color: #666666; font-style: italic;")
+        
+        self.view_result_btn = QPushButton("👁 View Result")
+        self.view_result_btn.clicked.connect(self.view_result)
+        self.view_result_btn.setEnabled(False)
+        
+        self.export_result_btn = QPushButton("📤 Export Result")
+        self.export_result_btn.clicked.connect(self.export_result)
+        self.export_result_btn.setEnabled(False)
+        
+        results_layout.addWidget(self.result_label)
+        button_layout = QHBoxLayout()
+        button_layout.addWidget(self.view_result_btn)
+        button_layout.addWidget(self.export_result_btn)
+        results_layout.addLayout(button_layout)
+        
+        results_group.setLayout(results_layout)
+        layout.addWidget(results_group)
+        
+        layout.addStretch()
+        
+        # Initialize UI state
+        self.update_generation_type()
+        
+    def on_text_changed(self, text):
+        """Handle text input changes"""
+        if text.strip():
+            self.generation_type.setCurrentText("Text → 3D")
+            
+    def on_generation_type_changed(self, text):
+        """Handle generation type changes"""
+        self.update_generation_type()
+        
+    def update_generation_type(self):
+        """Update UI based on selected generation type"""
+        gen_type = self.generation_type.currentText()
+        
+        if gen_type == "Text → 3D":
+            self.text_input.setEnabled(True)
+            self.select_image_btn.setEnabled(False)
+            self.clear_image_btn.setEnabled(False)
+        elif gen_type == "Image → 3D":
+            self.text_input.setEnabled(False)
+            self.select_image_btn.setEnabled(True)
+            self.clear_image_btn.setEnabled(bool(self.current_image_path))
+        else:  # Text + Image → 3D
+            self.text_input.setEnabled(True)
+            self.select_image_btn.setEnabled(True)
+            self.clear_image_btn.set_enabled(bool(self.current_image_path))
+            
+    def select_image(self):
+        """Select reference image"""
+        file_path, _ = QFileDialog.getOpenFileName(
+            self, "Select Reference Image", "", 
+            "Image Files (*.png *.jpg *.jpeg *.bmp *.tiff)"
+        )
+        if file_path:
+            self.current_image_path = file_path
+            self.image_path_label.setText(Path(file_path).name)
+            self.clear_image_btn.setEnabled(True)
+            self.generation_type.setCurrentText("Image → 3D")
+            self.log_status(f"Selected image: {Path(file_path).name}")
+            
+    def clear_image(self):
+        """Clear selected image"""
+        self.current_image_path = None
+        self.image_path_label.setText("No image selected")
+        self.clear_image_btn.setEnabled(False)
+        self.log_status("Image cleared")
+        
+    def generate_character(self):
+        """Generate 3D character using AI"""
+        if self.generation_thread and self.generation_thread.isRunning():
+            self.log_status("Generation already in progress...")
+            return
+            
+        # Get input data
+        text_prompt = self.text_input.text().strip()
+        gen_type = self.generation_type.currentText()
+        
+        # Validate inputs
+        if gen_type == "Text → 3D" and not text_prompt:
+            self.log_status("Please enter a text prompt!")
+            self.froggy_ai.speak("Hey! I need a description to work with!")
+            return
+            
+        if gen_type == "Image → 3D" and not self.current_image_path:
+            self.log_status("Please select an image!")
+            self.froggy_ai.speak("I need an image to convert to 3D!")
+            return
+            
+        if gen_type == "Text + Image → 3D" and (not text_prompt or not self.current_image_path):
+            self.log_status("Please provide both text and image!")
+            self.froggy_ai.speak("I need both text and image for combined generation!")
+            return
+            
+        # Prepare generation
+        self.generate_btn.setEnabled(False)
+        self.progress_bar.setVisible(True)
+        self.progress_bar.setValue(0)
+        
+        input_data = {
+            "text": text_prompt,
+            "image": self.current_image_path
+        }
+        
+        generation_type = gen_type.lower().replace(" → ", "_").replace(" + ", "_plus_").replace(" ", "_")
+        
+        self.log_status(f"Starting {gen_type} generation...")
+        self.froggy_ai.speak(f"Alright! Let me create a 3D character using {gen_type}. This might take a moment...")
+        
+        # Start generation thread
+        from ai.triposr_handler import TripoSRHandler
+        ai_backend = TripoSRHandler()
+        
+        self.generation_thread = GenerationThread(ai_backend, input_data, generation_type)
+        self.generation_thread.progress_update.connect(self.update_progress)
+        self.generation_thread.generation_complete.connect(self.generation_complete)
+        self.generation_thread.generation_error.connect(self.generation_error)
+        self.generation_thread.status_update.connect(self.log_status)
+        
+        self.generation_thread.start()
+        
+    def update_progress(self, value):
+        """Update progress bar"""
+        self.progress_bar.setValue(value)
+        
+    def generation_complete(self, mesh_path, generation_type):
+        """Handle successful generation"""
+        self.progress_bar.setVisible(False)
+        self.generate_btn.setEnabled(True)
+        
+        self.log_status(f"✅ Generation complete!\n📁 Mesh saved to: {mesh_path}")
+        self.froggy_ai.speak("🎉 Voilà! Your 3D character is ready. Looking absolutely magnificent!")
+        
+        # Update state with new mesh
+        self.state_manager.set_character_mesh(mesh_path, ai_generated=True)
+        if self.text_input.text().strip():
+            self.state_manager.current_character.generation_prompt = self.text_input.text().strip()
+        
+        # Enable result buttons
+        self.view_result_btn.setEnabled(True)
+        self.export_result_btn.setEnabled(True)
+        self.result_label.setText(f"🎉 Successfully generated 3D character!\n📁 File: {Path(mesh_path).name}\n🤖 Method: {generation_type.replace('_', ' ').title()}")
+        self.result_label.setStyleSheet("color: #4CAF50; font-weight: bold;")
+        
+    def generation_error(self, error_msg):
+        """Handle generation error"""
+        self.progress_bar.setVisible(False)
+        self.generate_btn.setEnabled(True)
+        
+        self.log_status(f"❌ Generation failed: {error_msg}")
+        self.froggy_ai.speak(f"😅 Oops! Something went wrong: {error_msg}\nDon't worry, even frogs have bad days!")
+        
+        self.result_label.setText(f"❌ Generation failed: {error_msg}\nPlease try again with different inputs.")
+        self.result_label.setStyleSheet("color: #f44336;")
+        
+        # Disable result buttons
+        self.view_result_btn.setEnabled(False)
+        self.export_result_btn.setEnabled(False)
+        
+    def log_status(self, message):
+        """Log status message"""
+        self.status_text.append(message)
+        logger.info(message)
+        
+    def view_result(self):
+        """View generation result"""
+        if self.state_manager.current_character.mesh_path:
+            self.log_status("Opening 3D viewer... (Feature coming soon!)")
+            self.froggy_ai.speak("Let me show you your creation in all its 3D glory!")
+            
+    def export_result(self):
+        """Export generation result"""
+        if self.state_manager.current_character.mesh_path:
+            self.log_status("Exporting result... (Switching to Rigging tab)")
+            # Switch to rigging tab for export
+            self.parent().parent().parent().rigging_tab.set_mesh_path(self.state_manager.current_character.mesh_path)
+            self.parent().parent().parent().tab_widget.setCurrentWidget(self.parent().parent().parent().rigging_tab)
+            self.froggy_ai.speak("Time to rig and export your masterpiece!")
