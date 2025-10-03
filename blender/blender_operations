@@ -1,0 +1,383 @@
+"""Real Blender mesh operations and manipulations"""
+import bpy
+import bmesh
+import json
+import logging
+from pathlib import Path
+from typing import Dict, Any, List, Optional
+import mathutils
+
+logger = logging.getLogger(__name__)
+
+class BlenderOperations:
+    """Real Blender mesh operations for 3D_God"""
+    
+    def __init__(self):
+        self.ensure_blender_context()
+        
+    def ensure_blender_context(self):
+        """Ensure we're running in Blender context"""
+        if not bpy.context:
+            raise RuntimeError("Blender context not available")
+    
+    def create_base_character(self, parameters: Dict[str, float]) -> str:
+        """Create a base character mesh with given parameters"""
+        try:
+            # Clear existing mesh
+            bpy.ops.object.select_all(action='SELECT')
+            bpy.ops.object.delete(use_global=False)
+            
+            # Create character components
+            character_data = self.build_character_mesh(parameters)
+            
+            # Create armature
+            armature = self.create_armature(character_data)
+            
+            # Apply automatic weights
+            self.apply_automatic_weights(character_data['mesh'], armature)
+            
+            # Export result
+            return self.export_character(character_data['mesh'], armature)
+            
+        except Exception as e:
+            logger.error(f"Character creation failed: {e}")
+            raise
+    
+    def build_character_mesh(self, params: Dict[str, float]) -> Dict[str, Any]:
+        """Build character mesh from parameters"""
+        
+        # Apply parameter scaling
+        height = params.get('Height', 1.0) * 2.0
+        weight = params.get('Weight', 1.0)
+        muscle = params.get('Muscle Mass', 0.5)
+        chest = params.get('Chest Size', 1.0)
+        waist = params.get('Waist Size', 1.0)
+        hips = params.get('Hip Size', 1.0)
+        
+        # Create base mesh using bmesh
+        bm = bmesh.new()
+        
+        # Torso (cylinder)
+        bmesh.ops.create_cube(bm, size=1.0)
+        
+        # Scale based on parameters
+        bmesh.ops.scale(bm, 
+            vec=(chest * 0.3, waist * 0.25, height * 0.6),
+            verts=bm.verts)
+        
+        # Move to position
+        bmesh.ops.translate(bm, 
+            vec=(0, 0, height * 0.3),
+            verts=bm.verts)
+        
+        # Add head (sphere)
+        head_verts = self.add_head(bm, height, chest)
+        
+        # Add limbs
+        arm_verts = self.add_limbs(bm, height, muscle)
+        leg_verts = self.add_legs(bm, height, hips)
+        
+        # Create mesh
+        mesh = bpy.data.meshes.new("CharacterMesh")
+        bm.to_mesh(mesh)
+        bm.free()
+        
+        # Create object
+        obj = bpy.data.objects.new("Character", mesh)
+        bpy.context.collection.objects.link(obj)
+        bpy.context.view_layer.objects.active = obj
+        
+        # Add subdivision modifier for smoothness
+        subsurf = obj.modifiers.new("Subdivision", 'SUBSURF')
+        subsurf.levels = 2
+        subsurf.render_levels = 3
+        
+        return {
+            'mesh': obj,
+            'vertices': {
+                'head': head_verts,
+                'arms': arm_verts,
+                'legs': leg_verts
+            }
+        }
+    
+    def add_head(self, bm: bmesh.types.BMesh, height: float, chest: float) -> List[bmesh.types.Vert]:
+        """Add head geometry"""
+        
+        # Create sphere for head
+        bmesh.ops.create_uvsphere(bm, u_segments=16, v_segments=12, diameter=0.15 * chest)
+        
+        # Get head vertices
+        head_verts = [v for v in bm.verts if v.co.z > 0.8]
+        
+        # Position head
+        bmesh.ops.translate(bm, vec=(0, 0, height * 0.8), verts=head_verts)
+        
+        return head_verts
+    
+    def add_limbs(self, bm: bmesh.types.BMesh, height: float, muscle: float) -> Dict[str, List[bmesh.types.Vert]]:
+        """Add arm geometry"""
+        
+        limb_verts = {}
+        
+        # Right arm
+        bmesh.ops.create_cylinder(bm, segments=8, diameter=0.08 * (1 + muscle), depth=0.6)
+        right_arm = [v for v in bm.verts if v.co.x > 0.1]
+        bmesh.ops.translate(bm, vec=(0.4, 0, height * 0.4), verts=right_arm)
+        bmesh.ops.rotate(bm, verts=right_arm, matrix=mathutils.Matrix.Rotation(0.3, 3, 'Z'))
+        limb_verts['right_arm'] = right_arm
+        
+        # Left arm
+        bmesh.ops.create_cylinder(bm, segments=8, diameter=0.08 * (1 + muscle), depth=0.6)
+        left_arm = [v for v in bm.verts if v.co.x > 0.1][-32:]  # Get recent vertices
+        bmesh.ops.translate(bm, vec=(-0.4, 0, height * 0.4), verts=left_arm)
+        bmesh.ops.rotate(bm, verts=left_arm, matrix=mathutils.Matrix.Rotation(-0.3, 3, 'Z'))
+        limb_verts['left_arm'] = left_arm
+        
+        return limb_verts
+    
+    def add_legs(self, bm: bmesh.types.BMesh, height: float, hips: float) -> Dict[str, List[bmesh.types.Vert]]:
+        """Add leg geometry"""
+        
+        leg_verts = {}
+        
+        # Right leg
+        bmesh.ops.create_cylinder(bm, segments=8, diameter=0.1 * hips, depth=0.8)
+        right_leg = [v for v in bm.verts if v.co.x > 0.05]
+        bmesh.ops.translate(bm, vec=(0.15, 0, -height * 0.3), verts=right_leg)
+        leg_verts['right_leg'] = right_leg
+        
+        # Left leg
+        bmesh.ops.create_cylinder(bm, segments=8, diameter=0.1 * hips, depth=0.8)
+        left_leg = [v for v in bm.verts if v.co.x > 0.05][-32:]
+        bmesh.ops.translate(bm, vec=(-0.15, 0, -height * 0.3), verts=left_leg)
+        leg_verts['left_leg'] = left_leg
+        
+        return leg_verts
+    
+    def create_armature(self, character_data: Dict[str, Any]) -> bpy.types.Object:
+        """Create armature for character"""
+        
+        # Create armature
+        armature = bpy.data.armatures.new("CharacterArmature")
+        armature_obj = bpy.data.objects.new("CharacterRig", armature)
+        bpy.context.collection.objects.link(armature_obj)
+        
+        # Enter edit mode
+        bpy.context.view_layer.objects.active = armature_obj
+        bpy.ops.object.mode_set(mode='EDIT')
+        
+        # Create bones
+        bones = {}
+        
+        # Root bone
+        root_bone = armature.edit_bones.new("Root")
+        root_bone.head = (0, 0, 0)
+        root_bone.tail = (0, 0, 0.1)
+        bones['root'] = root_bone
+        
+        # Spine bones
+        spine_bone = armature.edit_bones.new("Spine")
+        spine_bone.head = (0, 0, 0.1)
+        spine_bone.tail = (0, 0, 0.6)
+        spine_bone.parent = root_bone
+        bones['spine'] = spine_bone
+        
+        # Head bone
+        head_bone = armature.edit_bones.new("Head")
+        head_bone.head = (0, 0, 0.6)
+        head_bone.tail = (0, 0, 0.9)
+        head_bone.parent = spine_bone
+        bones['head'] = head_bone
+        
+        # Arm bones
+        right_shoulder = armature.edit_bones.new("RightShoulder")
+        right_shoulder.head = (0.2, 0, 0.5)
+        right_shoulder.tail = (0.4, 0, 0.6)
+        right_shoulder.parent = spine_bone
+        
+        right_arm = armature.edit_bones.new("RightArm")
+        right_arm.head = (0.4, 0, 0.6)
+        right_arm.tail = (0.6, 0, 0.6)
+        right_arm.parent = right_shoulder
+        
+        left_shoulder = armature.edit_bones.new("LeftShoulder")
+        left_shoulder.head = (-0.2, 0, 0.5)
+        left_shoulder.tail = (-0.4, 0, 0.6)
+        left_shoulder.parent = spine_bone
+        
+        left_arm = armature.edit_bones.new("LeftArm")
+        left_arm.head = (-0.4, 0, 0.6)
+        left_arm.tail = (-0.6, 0, 0.6)
+        left_arm.parent = left_shoulder
+        
+        # Leg bones
+        right_leg = armature.edit_bones.new("RightLeg")
+        right_leg.head = (0.15, 0, 0)
+        right_leg.tail = (0.15, 0, -0.5)
+        right_leg.parent = root_bone
+        
+        left_leg = armature.edit_bones.new("LeftLeg")
+        left_leg.head = (-0.15, 0, 0)
+        left_leg.tail = (-0.15, 0, -0.5)
+        left_leg.parent = root_bone
+        
+        # Exit edit mode
+        bpy.ops.object.mode_set(mode='OBJECT')
+        
+        return armature_obj
+    
+    def apply_automatic_weights(self, mesh_obj: bpy.types.Object, armature_obj: bpy.types.Object):
+        """Apply automatic weight painting"""
+        
+        # Select both objects
+        mesh_obj.select_set(True)
+        armature_obj.select_set(True)
+        bpy.context.view_layer.objects.active = armature_obj
+        
+        # Parent with automatic weights
+        bpy.ops.object.parent_set(type='ARMATURE_AUTO')
+        
+        logger.info("Automatic weights applied")
+    
+    def export_character(self, mesh_obj: bpy.types.Object, armature_obj: bpy.types.Object) -> str:
+        """Export character as FBX"""
+        
+        # Select objects for export
+        mesh_obj.select_set(True)
+        armature_obj.select_set(True)
+        
+        # Export path
+        export_path = str(Path(bpy.context.blend_data.filepath).parent / "exports" / "character_generated.fbx")
+        Path(export_path).parent.mkdir(exist_ok=True)
+        
+        # Export settings
+        bpy.ops.export_scene.fbx(
+            filepath=export_path,
+            use_selection=True,
+            embed_textures=True,
+            path_mode='AUTO',
+            object_types={'ARMATURE', 'MESH'},
+            use_mesh_modifiers=True,
+            mesh_smooth_type='FACE',
+            add_leaf_bones=False,
+            primary_bone_axis='Y',
+            secondary_bone_axis='X',
+            axis_forward='-Z',
+            axis_up='Y'
+        )
+        
+        logger.info(f"Character exported: {export_path}")
+        return export_path
+    
+    def modify_character_parameters(self, mesh_obj: bpy.types.Object, parameters: Dict[str, float]):
+        """Modify existing character with new parameters"""
+        
+        # Enter edit mode
+        bpy.context.view_layer.objects.active = mesh_obj
+        bpy.ops.object.mode_set(mode='EDIT')
+        
+        # Create bmesh instance
+        bm = bmesh.from_mesh(mesh_obj.data)
+        
+        # Apply parameter-based modifications
+        height_scale = parameters.get('Height', 1.0)
+        weight_scale = parameters.get('Weight', 1.0)
+        muscle_scale = parameters.get('Muscle Mass', 0.5)
+        chest_scale = parameters.get('Chest Size', 1.0)
+        
+        # Scale vertices based on body parts
+        for vert in bm.verts:
+            if vert.co.z > 0.8:  # Head
+                vert.co *= (0.9 + muscle_scale * 0.2)
+            elif vert.co.z > 0.4:  # Torso
+                scale_factor = (chest_scale * 0.7 + weight_scale * 0.3)
+                vert.co.x *= scale_factor
+                vert.co.y *= scale_factor
+                vert.co.z *= height_scale
+            elif vert.co.z < 0:  # Legs
+                vert.co.z *= height_scale
+                vert.co.x *= (0.9 + muscle_scale * 0.2)
+        
+        # Update mesh
+        bm.to_mesh(mesh_obj.data)
+        bm.free()
+        
+        # Exit edit mode
+        bpy.ops.object.mode_set(mode='OBJECT')
+        
+        logger.info("Character parameters updated")
+
+# Real Blender operations integration
+class RealBlenderController:
+    """Controller that actually performs Blender operations"""
+    
+    def __init__(self, project_manager):
+        self.project_manager = project_manager
+        self.ops = BlenderOperations()
+        
+    def create_character(self, parameters: Dict[str, float]) -> str:
+        """Create a real 3D character"""
+        try:
+            # This will only work if running inside Blender
+            return self.ops.create_base_character(parameters)
+        except RuntimeError:
+            # Fallback for when Blender isn't available
+            return self.create_fallback_character(parameters)
+    
+    def create_fallback_character(self, parameters: Dict[str, float]) -> str:
+        """Create fallback character when Blender isn't available"""
+        
+        # Create OBJ file with parameter-based modifications
+        export_path = self.project_manager.get_export_path("character_generated.obj")
+        
+        # Generate OBJ content based on parameters
+        height = parameters.get('Height', 1.0) * 2.0
+        weight = parameters.get('Weight', 1.0)
+        chest = parameters.get('Chest Size', 1.0)
+        
+        obj_content = f'''# 3D_God V3 Generated Character
+# Parameters: Height={height}, Weight={weight}, Chest={chest}
+
+mtllib character.mtl
+usemtl CharacterMaterial
+
+# Vertices (parameter-based)
+v 0.0 0.0 0.0
+v {chest*0.3} 0.0 0.0
+v {-chest*0.3} 0.0 0.0
+v 0.0 {height*0.6} 0.0
+v {chest*0.2} {height*0.6} 0.0
+v {-chest*0.2} {height*0.6} 0.0
+v 0.0 {height*0.9} 0.0
+v {chest*0.15} {height*0.9} 0.0
+v {-chest*0.15} {height*0.9} 0.0
+v 0.0 {height} 0.0
+
+# Faces
+f 1 2 5
+f 1 5 3
+f 4 5 7
+f 4 7 6
+f 7 8 10
+f 7 10 9
+'''
+        
+        with open(export_path, 'w') as f:
+            f.write(obj_content)
+        
+        # Create MTL file
+        mtl_path = export_path.with_suffix('.mtl')
+        mtl_content = '''# Material for generated character
+newmtl CharacterMaterial
+Ka 0.2 0.2 0.2
+Kd 0.8 0.6 0.4
+Ks 0.3 0.3 0.3
+Ns 10.0
+'''
+        
+        with open(mtl_path, 'w') as f:
+            f.write(mtl_content)
+        
+        logger.info(f"Fallback character created: {export_path}")
+        return str(export_path)
