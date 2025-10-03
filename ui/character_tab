@@ -1,8 +1,9 @@
 """Character editing tab with sculpting and anatomy controls"""
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QSlider, 
                               QLabel, QPushButton, QGroupBox, QGridLayout,
-                              QScrollArea, QFrame)
+                              QScrollArea, QFrame, QSplitter)
 from PySide6.QtCore import Qt, Signal
+from ui.viewport_widget import Viewport3D
 import logging
 
 logger = logging.getLogger(__name__)
@@ -17,38 +18,53 @@ class CharacterTab(QWidget):
         self.state_manager = state_manager
         self.froggy_ai = froggy_ai
         self.sliders = {}
+        self.current_mesh_path = None
         self.setup_ui()
         
     def setup_ui(self):
         """Setup the character tab UI"""
         layout = QVBoxLayout(self)
         
-        # Create scrollable area
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll_widget = QWidget()
-        scroll_layout = QVBoxLayout(scroll_widget)
+        # Create split view - controls on left, viewport on right
+        main_splitter = QSplitter(Qt.Horizontal)
+        
+        # Controls panel
+        controls_widget = QWidget()
+        controls_layout = QVBoxLayout(controls_widget)
         
         # Body parameters group
         body_group = self.create_body_parameters_group()
-        scroll_layout.addWidget(body_group)
+        controls_layout.addWidget(body_group)
         
         # Sculpting controls
         sculpt_group = self.create_sculpting_group()
-        scroll_layout.addWidget(sculpt_group)
+        controls_layout.addWidget(sculpt_group)
         
         # Anatomy layers
         anatomy_group = self.create_anatomy_group()
-        scroll_layout.addWidget(anatomy_group)
+        controls_layout.addWidget(anatomy_group)
         
         # Gender controls
         gender_group = self.create_gender_group()
-        scroll_layout.addWidget(gender_group)
+        controls_layout.addWidget(gender_group)
         
-        scroll_layout.addStretch()
-        scroll.setWidget(scroll_widget)
-        layout.addWidget(scroll)
+        controls_layout.addStretch()
         
+        # 3D Viewport
+        self.viewport = Viewport3D()
+        self.viewport.setMinimumSize(400, 400)
+        
+        # Connect signals
+        self.parameter_changed.connect(self.on_parameter_changed)
+        
+        # Add to splitter
+        main_splitter.addWidget(controls_widget)
+        main_splitter.addWidget(self.viewport)
+        main_splitter.setStretchFactor(0, 1)
+        main_splitter.setStretchFactor(1, 1)
+        
+        layout.addWidget(main_splitter)
+
     def create_body_parameters_group(self):
         """Create body parameters control group"""
         group = QGroupBox("Body Parameters")
@@ -192,8 +208,22 @@ class CharacterTab(QWidget):
         self.state_manager.update_character_parameter(name, float_value)
         self.parameter_changed.emit(name, float_value)
         
+        # Update the 3D view
+        self.update_viewport_mesh()
+        
+        # Let Froggy comment on changes
+        if value > 1.5:
+            self.froggy_ai.speak(f"Whoa! That's quite a {name} you've got there!")
+        elif value < 0.5:
+            self.froggy_ai.speak(f"Going for the petite {name} look, I see!")
+        
+    def update_viewport_mesh(self):
+        """Update the 3D viewport with current mesh"""
+        if hasattr(self, 'current_mesh_path') and self.current_mesh_path:
+            self.viewport.load_mesh(self.current_mesh_path)
+        
     def open_blender_sculpting(self):
-        """Open Blender in sculpting mode"""
+        """Open Blender sculpting mode"""
         self.froggy_ai.speak("Opening Blender sculpting mode... Time to get artistic!")
         # Will implement Blender integration
         
@@ -237,7 +267,14 @@ class CharacterTab(QWidget):
         }
         self.state_manager.update_gender_combination(combination)
         
+    def set_mesh_path(self, mesh_path: str):
+        """Set current mesh path and update viewport"""
+        self.current_mesh_path = mesh_path
+        self.update_viewport_mesh()
+        
     def reset_ui(self):
         """Reset UI to default values"""
         for name, slider in self.sliders.items():
             slider.setValue(100)  # Default to 1.0
+        if hasattr(self, 'viewport'):
+            self.viewport.show_placeholder()
