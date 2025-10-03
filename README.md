@@ -1,8 +1,8 @@
-# 🐸 3D_God V3 - Ultimate Character Creator
+# 🐸 3D_God4 - Ultimate Character Creator
 
 A complete 3D character creation tool with AI integration, based on the German development plan. Create anatomically correct, rigged 3D characters with full NSFW support, AI generation, and seamless export to game engines.
 
-![3D_God V3](assets/icon.png)
+![3D_God4](assets/icon.png)
 
 ## 🌟 Features
 
@@ -39,8 +39,8 @@ A complete 3D character creation tool with AI integration, based on the German d
 ### Automatic Installation (Recommended)
 ```bash
 # Clone the repository
-git clone https://github.com/yourusername/3D_God_V3.git
-cd 3D_God_V3
+git clone https://github.com/yourusername/3D_God4.git
+cd 3D_God4
 
 # Run setup script
 python setup.py
