@@ -1,0 +1,454 @@
+"""3D viewport widget for real-time preview"""
+from PySide6.QtWidgets import QWidget, QVBoxLayout, QLabel
+from PySide6.QtCore import Qt, QTimer, Signal
+from PySide6.QtGui import QPainter, QPen, QBrush, QColor
+import logging
+import numpy as np
+from typing import Optional, Dict, Any
+
+logger = logging.getLogger(__name__)
+
+class Viewport3D(QWidget):
+    """3D viewport widget for displaying characters"""
+    
+    mesh_loaded = Signal(str)
+    view_changed = Signal(str)
+    
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.mesh_data = None
+        self.view_angle = "front"
+        self.auto_rotate = False
+        self.rotation_angle = 0
+        self.mesh_loaded = False
+        
+        # Camera settings
+        self.camera_distance = 5.0
+        self.camera_fov = 45
+        
+        # Lighting
+        self.lights = [
+            {"position": [5, 5, 5], "color": [1.0, 1.0, 1.0], "intensity": 1.0},
+            {"position": [-5, 5, -5], "color": [0.8, 0.8, 1.0], "intensity": 0.5}
+        ]
+        
+        self.setup_ui()
+        self.setup_rendering()
+        
+    def setup_ui(self):
+        """Setup viewport UI"""
+        layout = QVBoxLayout(self)
+        
+        # 3D viewport area
+        self.viewport_label = QLabel("3D Viewport - Loading...")
+        self.viewport_label.setMinimumSize(400, 400)
+        self.viewport_label.setStyleSheet("""
+            QLabel {
+                background-color: #2b2b2b;
+                border: 2px solid #555555;
+                color: #cccccc;
+                font-size: 14px;
+                font-weight: bold;
+            }
+        """)
+        self.viewport_label.setAlignment(Qt.AlignCenter)
+        
+        layout.addWidget(self.viewport_label)
+        
+        # Controls
+        self.setup_controls()
+        
+    def setup_controls(self):
+        """Setup viewport controls"""
+        from PySide6.QtWidgets import QHBoxLayout, QPushButton, QComboBox
+        
+        controls_layout = QHBoxLayout()
+        
+        # View selection
+        self.view_combo = QComboBox()
+        self.view_combo.addItems(["Front", "Side", "Top", "Perspective", "Wireframe"])
+        self.view_combo.currentTextChanged.connect(self.change_view)
+        controls_layout.addWidget(self.view_combo)
+        
+        # Control buttons
+        rotate_btn = QPushButton("🔄 Rotate")
+        rotate_btn.clicked.connect(self.toggle_rotation)
+        controls_layout.addWidget(rotate_btn)
+        
+        reset_btn = QPushButton("🏠 Reset View")
+        reset_btn.clicked.connect(self.reset_view)
+        controls_layout.addWidget(reset_btn)
+        
+        # Add to main layout
+        self.layout().addLayout(controls_layout)
+    
+    def setup_rendering(self):
+        """Setup rendering system"""
+        self.render_timer = QTimer()
+        self.render_timer.timeout.connect(self.render_frame)
+        self.render_timer.start(16)  # ~60 FPS
+        
+        # Initialize with placeholder
+        self.show_placeholder()
+    
+    def show_placeholder(self):
+        """Show placeholder when no mesh is loaded"""
+        self.viewport_label.setText("🎮 3D Viewport\n\nLoad a character to see it here!\n\n🐸 Froggy says: 'The third dimension awaits!'")
+        self.mesh_loaded = False
+    
+    def load_mesh(self, mesh_path: str):
+        """Load 3D mesh file"""
+        try:
+            if mesh_path.endswith('.obj'):
+                self.load_obj_mesh(mesh_path)
+            elif mesh_path.endswith('.fbx'):
+                self.load_fbx_mesh(mesh_path)
+            else:
+                self.show_error(f"Unsupported format: {mesh_path}")
+                return
+            
+            self.mesh_loaded = True
+            self.mesh_loaded.emit(mesh_path)
+            self.viewport_label.setText("")  # Clear placeholder text
+            
+        except Exception as e:
+            logger.error(f"Failed to load mesh: {e}")
+            self.show_error(f"Failed to load mesh: {e}")
+    
+    def load_obj_mesh(self, obj_path: str):
+        """Load OBJ mesh file"""
+        try:
+            vertices, faces, normals, texcoords = self.parse_obj_file(obj_path)
+            
+            self.mesh_data = {
+                'vertices': vertices,
+                'faces': faces,
+                'normals': normals,
+                'texcoords': texcoords,
+                'format': 'obj'
+            }
+            
+            logger.info(f"Loaded OBJ mesh: {len(vertices)} vertices, {len(faces)} faces")
+            
+        except Exception as e:
+            logger.error(f"Failed to parse OBJ: {e}")
+            raise
+    
+    def parse_obj_file(self, obj_path: str) -> tuple:
+        """Parse OBJ file and extract geometry data"""
+        vertices = []
+        faces = []
+        normals = []
+        texcoords = []
+        
+        with open(obj_path, 'r') as f:
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith('#'):
+                    continue
+                
+                parts = line.split()
+                if not parts:
+                    continue
+                
+                if parts[0] == 'v':
+                    vertices.append([float(parts[1]), float(parts[2]), float(parts[3])])
+                elif parts[0] == 'vn':
+                    normals.append([float(parts[1]), float(parts[2]), float(parts[3])])
+                elif parts[0] == 'vt':
+                    texcoords.append([float(parts[1]), float(parts[2])])
+                elif parts[0] == 'f':
+                    face = []
+                    for vertex in parts[1:]:
+                        vertex_data = vertex.split('/')
+                        v_idx = int(vertex_data[0]) - 1  # OBJ indices are 1-based
+                        face.append(v_idx)
+                    faces.append(face)
+        
+        return np.array(vertices), faces, np.array(normals) if normals else None, np.array(texcoords) if texcoords else None
+    
+    def load_fbx_mesh(self, fbx_path: str):
+        """Load FBX mesh file (simplified)"""
+        try:
+            # For FBX, we'll create a simplified representation
+            # In a full implementation, you'd use the FBX SDK or ASSIMP
+            
+            logger.info(f"Loading FBX mesh: {fbx_path}")
+            
+            # Create a placeholder representation
+            self.mesh_data = {
+                'vertices': np.array([
+                    [-0.5, -0.5, 0], [0.5, -0.5, 0], [0.5, 0.5, 0], [-0.5, 0.5, 0],
+                    [-0.5, -0.5, 1], [0.5, -0.5, 1], [0.5, 0.5, 1], [-0.5, 0.5, 1]
+                ]),
+                'faces': [[0, 1, 2, 3], [4, 7, 6, 5], [0, 4, 5, 1], [2, 6, 7, 3], [0, 3, 7, 4], [1, 5, 6, 2]],
+                'normals': None,
+                'texcoords': None,
+                'format': 'fbx',
+                'original_path': fbx_path
+            }
+            
+        except Exception as e:
+            logger.error(f"Failed to load FBX: {e}")
+            raise
+    
+    def render_frame(self):
+        """Render a frame of the 3D scene"""
+        if not self.mesh_data or not self.mesh_loaded:
+            return
+        
+        try:
+            # Create QPainter for custom rendering
+            pixmap = self.viewport_label.pixmap()
+            if not pixmap or pixmap.size() != self.viewport_label.size():
+                pixmap = self.viewport_label.pixmap()
+                if not pixmap:
+                    pixmap = self.create_pixmap()
+            
+            painter = QPainter(pixmap)
+            painter.setRenderHint(QPainter.Antialiasing)
+            
+            # Clear background
+            painter.fillRect(pixmap.rect(), QColor(43, 43, 43))
+            
+            # Render 3D mesh
+            self.render_mesh(painter, self.mesh_data)
+            
+            # Draw UI overlays
+            self.render_ui_overlays(painter)
+            
+            painter.end()
+            
+            self.viewport_label.setPixmap(pixmap)
+            
+        except Exception as e:
+            logger.error(f"Rendering error: {e}")
+    
+    def create_pixmap(self):
+        """Create a new pixmap for rendering"""
+        from PySide6.QtGui import QPixmap
+        return QPixmap(self.viewport_label.size())
+    
+    def render_mesh(self, painter: QPainter, mesh_data: Dict[str, Any]):
+        """Render the 3D mesh"""
+        
+        if not mesh_data or 'vertices' not in mesh_data:
+            return
+        
+        vertices = mesh_data['vertices']
+        faces = mesh_data['faces']
+        
+        # Apply view transformation
+        transformed_vertices = self.apply_view_transformation(vertices)
+        
+        # Project to 2D
+        screen_coords = self.project_to_screen(transformed_vertices)
+        
+        # Render faces
+        for face in faces:
+            if len(face) >= 3:
+                self.render_face(painter, screen_coords, face, vertices)
+    
+    def apply_view_transformation(self, vertices: np.ndarray) -> np.ndarray:
+        """Apply view transformation based on current view angle"""
+        
+        # Simple rotation based on view angle
+        angle = self.rotation_angle if self.auto_rotate else 0
+        
+        if self.view_angle == "front":
+            rotation_matrix = self.create_rotation_matrix(0, 0, 0)
+        elif self.view_angle == "side":
+            rotation_matrix = self.create_rotation_matrix(0, 90, 0)
+        elif self.view_angle == "top":
+            rotation_matrix = self.create_rotation_matrix(90, 0, 0)
+        else:  # perspective
+            rotation_matrix = self.create_rotation_matrix(0, angle, 0)
+        
+        # Apply rotation
+        transformed_vertices = vertices.copy()
+        for i, vertex in enumerate(transformed_vertices):
+            transformed_vertices[i] = rotation_matrix @ vertex
+        
+        return transformed_vertices
+    
+    def create_rotation_matrix(self, rx: float, ry: float, rz: float) -> np.ndarray:
+        """Create rotation matrix from Euler angles (degrees)"""
+        
+        # Convert to radians
+        rx, ry, rz = np.radians([rx, ry, rz])
+        
+        # Individual rotation matrices
+        Rx = np.array([[1, 0, 0],
+                       [0, np.cos(rx), -np.sin(rx)],
+                       [0, np.sin(rx), np.cos(rx)]])
+        
+        Ry = np.array([[np.cos(ry), 0, np.sin(ry)],
+                       [0, 1, 0],
+                       [-np.sin(ry), 0, np.cos(ry)]])
+        
+        Rz = np.array([[np.cos(rz), -np.sin(rz), 0],
+                       [np.sin(rz), np.cos(rz), 0],
+                       [0, 0, 1]])
+        
+        # Combined rotation: Rz * Ry * Rx
+        return Rz @ Ry @ Rx
+    
+    def project_to_screen(self, vertices: np.ndarray) -> List[tuple]:
+        """Project 3D vertices to 2D screen coordinates"""
+        
+        screen_coords = []
+        viewport_size = self.viewport_label.size()
+        width, height = viewport_size.width(), viewport_size.height()
+        
+        # Simple perspective projection
+        for vertex in vertices:
+            x, y, z = vertex
+            
+            # Perspective divide
+            if z != 0:
+                x_proj = (x / (z + self.camera_distance)) * 100
+                y_proj = (y / (z + self.camera_distance)) * 100
+            else:
+                x_proj = x * 10
+                y_proj = y * 10
+            
+            # Convert to screen coordinates
+            screen_x = width // 2 + int(x_proj)
+            screen_y = height // 2 - int(y_proj)  # Flip Y for screen coordinates
+            
+            screen_coords.append((screen_x, screen_y))
+        
+        return screen_coords
+    
+    def render_face(self, painter: QPainter, screen_coords: List[tuple], face: List[int], vertices: np.ndarray):
+        """Render a single face"""
+        
+        if len(face) < 3:
+            return
+        
+        # Get face coordinates
+        face_coords = [screen_coords[i] for i in face if i < len(screen_coords)]
+        
+        if len(face_coords) < 3:
+            return
+        
+        # Calculate face normal for lighting
+        face_normal = self.calculate_face_normal(face, vertices)
+        light_intensity = max(0.3, abs(face_normal[2]))  # Simple lighting
+        
+        # Set face color based on lighting
+        base_color = QColor(200, 180, 160)  # Skin tone
+        light_color = QColor(
+            int(base_color.red() * light_intensity),
+            int(base_color.green() * light_intensity),
+            int(base_color.blue() * light_intensity)
+        )
+        
+        # Draw filled polygon
+        painter.setBrush(QBrush(light_color))
+        painter.setPen(QPen(QColor(100, 100, 100), 1))
+        
+        # Convert to QPolygon
+        from PySide6.QtGui import QPolygon
+        polygon = QPolygon()
+        for x, y in face_coords:
+            polygon.append(QtCore.QPoint(x, y))
+        
+        painter.drawPolygon(polygon)
+    
+    def calculate_face_normal(self, face: List[int], vertices: np.ndarray) -> np.ndarray:
+        """Calculate normal vector for a face"""
+        
+        if len(face) < 3:
+            return np.array([0, 0, 1])
+        
+        # Get vertices of the face
+        v1 = vertices[face[0]]
+        v2 = vertices[face[1]]
+        v3 = vertices[face[2]]
+        
+        # Calculate edges
+        edge1 = v2 - v1
+        edge2 = v3 - v1
+        
+        # Calculate normal using cross product
+        normal = np.cross(edge1, edge2)
+        
+        # Normalize
+        length = np.linalg.norm(normal)
+        if length > 0:
+            normal = normal / length
+        
+        return normal
+    
+    def render_ui_overlays(self, painter: QPainter):
+        """Render UI overlays"""
+        
+        # View angle indicator
+        painter.setPen(QPen(QColor(255, 255, 255), 2))
+        painter.setFont(self.font())
+        
+        # View angle text
+        painter.drawText(10, 25, f"View: {self.view_angle}")
+        
+        # Vertex count
+        if self.mesh_data and 'vertices' in self.mesh_data:
+            vertex_count = len(self.mesh_data['vertices'])
+            face_count = len(self.mesh_data['faces'])
+            painter.drawText(10, 45, f"Vertices: {vertex_count}, Faces: {face_count}")
+        
+        # Auto-rotate indicator
+        if self.auto_rotate:
+            painter.drawText(10, 65, f"Rotating: {self.rotation_angle:.1f}°")
+        
+        # Help text
+        painter.setPen(QPen(QColor(200, 200, 200), 1))
+        painter.drawText(10, self.height() - 10, "Drag to rotate • Scroll to zoom • Right-click for menu")
+    
+    def change_view(self, view_name: str):
+        """Change the current view angle"""
+        self.view_angle = view_name.lower()
+        self.view_changed.emit(self.view_angle)
+        logger.info(f"View changed to: {self.view_angle}")
+    
+    def toggle_rotation(self):
+        """Toggle auto-rotation"""
+        self.auto_rotate = not self.auto_rotate
+        if self.auto_rotate:
+            self.rotation_timer = QTimer()
+            self.rotation_timer.timeout.connect(self.update_rotation)
+            self.rotation_timer.start(50)  # 20 FPS rotation
+        else:
+            if hasattr(self, 'rotation_timer'):
+                self.rotation_timer.stop()
+    
+    def update_rotation(self):
+        """Update rotation angle"""
+        self.rotation_angle = (self.rotation_angle + 2) % 360
+    
+    def reset_view(self):
+        """Reset view to default"""
+        self.view_angle = "front"
+        self.rotation_angle = 0
+        self.auto_rotate = False
+        if hasattr(self, 'rotation_timer'):
+            self.rotation_timer.stop()
+    
+    def show_error(self, error_msg: str):
+        """Show error message"""
+        self.viewport_label.setText(f"❌ Error\n\n{error_msg}\n\n🐸 Froggy is confused!")
+        self.viewport_label.setStyleSheet("""
+            QLabel {
+                background-color: #2b2b2b;
+                border: 2px solid #ff4444;
+                color: #ffaaaa;
+                font-size: 14px;
+                font-weight: bold;
+            }
+        """)
+    
+    def set_mesh_data(self, mesh_data: Dict[str, Any]):
+        """Set mesh data directly"""
+        self.mesh_data = mesh_data
+        self.mesh_loaded = True
+        self.mesh_loaded.emit("direct_data")
